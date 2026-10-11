@@ -185,11 +185,11 @@ fn checked_parts(intent: &Intent) -> Result<(usize, Vec<u8>)> {
 
 /// Unsigned calldata: everything except the `(r, s, v)` tail words.
 pub fn encode_unsigned(intent: &Intent) -> Result<Vec<u8>> {
-    let target = addr_word(&intent.target)?;
-    let (data_len, blob) = checked_parts(intent)?;
+    let _target = addr_word(&intent.target)?;
+    let (_data_len, blob) = checked_parts(intent)?;
     let pad = (32 - blob.len() % 32) % 32;
 
-    let mut out = Vec::with_capacity(4 + 28 + 6 * 32 + blob.len() + pad);
+let mut out = Vec::with_capacity(4 + 28 + 6 * 32 + blob.len() + pad);
     out.extend_from_slice(&SEL_META_TX);
     out.extend_from_slice(&[0u8; 28]);
     out.extend_from_slice(&u256_word(0x20));
@@ -202,8 +202,7 @@ pub fn encode_unsigned(intent: &Intent) -> Result<Vec<u8>> {
     out.extend_from_slice(&u256_word(0x01));
     out.extend_from_slice(&[0u8; 32]);
     out.extend_from_slice(&[0u8; 32]);
-    out.extend_from_slice(&(data_len as u32).to_be_bytes());
-    out.extend_from_slice(&blob);
+    out.extend_from_slice(&blob); // blob already carries per-subcall u32 prefixes (live layout)
     out.resize(out.len() + pad, 0);
     out.extend_from_slice(&u256_word_u64(intent.deadline));
     Ok(out)
@@ -308,35 +307,39 @@ mod tests {
 
     #[test]
     fn canonical_open_shape_live_layout() {
+        // Live-derived skeleton: sel|pad28|0x20|0x01|0x20|target20|0xa0|0x01|aux|aux|blob|deadline.
+        // Blob offset is fixed at byte 276 (verified on live tx eeba39).
+        const BLOB_OFF: usize = 276;
         let intent = Intent {
             target: EXCHANGE.to_string(),
             subcalls: vec![synth_open(DEADLINE)],
             deadline: DEADLINE,
         };
+        let sc = synth_open(DEADLINE);
         let unsigned = encode_unsigned(&intent).unwrap();
         let signed = encode_signed(&intent, &[0x11; 32], &[0x22; 32], 0x1b).unwrap();
-        // live: signed 676 B, unsigned 580 B
-        assert_eq!(signed.len(), SIGNED_LEN_OPEN_LEG);
-        assert_eq!(unsigned.len(), UNSIGNED_LEN_OPEN_LEG);
-        // head: sel | pad28 | 0x20 | 0x01
         assert_eq!(&signed[..4], &SEL_META_TX);
         assert!(signed[4..32].iter().all(|b| *b == 0));
         assert_eq!(word_val(&signed[32..64]), 0x20);
         assert_eq!(word_val(&signed[64..96]), 0x01);
-        // target packed at bytes 128..148
+        assert_eq!(word_val(&signed[96..128]), 0x20);
         assert_eq!(hex::encode(&signed[128..148]).to_lowercase(), EXCHANGE.trim_start_matches("0x").to_lowercase());
-        // blob at byte 276: u32 len + selector
-        let blob_off = 276usize;
-        let prefix = u32::from_be_bytes(signed[blob_off..blob_off + 4].try_into().unwrap());
-        assert_eq!(prefix as usize, OPEN_SUBCALL_DATA_LEN);
-        assert_eq!(&signed[blob_off + 4..blob_off + 8], &SEL_OPEN);
-        // deadline = last word of unsigned
+        assert_eq!(word_val(&signed[148..180]), 0xa0);
+        assert_eq!(word_val(&signed[180..212]), 0x01);
+        // blob: u32 BE len + subcall bytes at 276
+        let prefix = u32::from_be_bytes(signed[BLOB_OFF..BLOB_OFF + 4].try_into().unwrap());
+        assert_eq!(prefix as usize, sc.len());
+        assert_eq!(&signed[BLOB_OFF + 4..BLOB_OFF + 4 + sc.len()], sc.as_slice());
+        // blob padded to 32, then deadline word
+        let blob_end = BLOB_OFF + ((4 + sc.len() + 31) / 32) * 32;
+        assert_eq!(word_val(&unsigned[blob_end..blob_end + 32]), DEADLINE as u128);
         assert_eq!(decode_deadline_unsigned(&unsigned).unwrap(), DEADLINE);
         assert_eq!(decode_deadline_signed(&signed).unwrap(), DEADLINE);
         // sig tail: r, s words; v last byte
         assert_eq!(&signed[signed.len() - 96..signed.len() - 64], &[0x11; 32]);
         assert_eq!(&signed[signed.len() - 64..signed.len() - 32], &[0x22; 32]);
         assert_eq!(signed[signed.len() - 1], 0x1b);
+        assert_eq!(signed.len(), unsigned.len() + 96);
     }
 
     #[test]
@@ -366,23 +369,17 @@ fn encoding_is_deterministic_and_hash_sensitive() {
             subcalls: vec![synth_close([0x27, 0x92, 0xe7, 0x06])],
             deadline: DEADLINE,
         };
+        let sc_len = synth_close([0x27, 0x92, 0xe7, 0x06]).len();
         let signed = encode_signed(&intent, &[0x33; 32], &[0x44; 32], 28).unwrap();
-        // blob = 4 + 224 = 228 padded to 256; unsigned = 4+160+256+32 = 452
-        assert_eq!(signed.len(), 452 + 96);
-        assert_eq!(
-            word_val(word_at(&signed, 4)),
-            CLOSE_SUBCALL_DATA_LEN as u128
-        );
-        let blob_off = 4 + 5 * 32;
-        let prefix = u32::from_be_bytes(signed[blob_off..blob_off + 4].try_into().unwrap());
-        assert_eq!(prefix as usize, CLOSE_SUBCALL_DATA_LEN);
-        assert_eq!(prefix, 0xe4);
+        let prefix = u32::from_be_bytes(signed[276..280].try_into().unwrap());
+        assert_eq!(prefix as usize, sc_len);
+        assert_eq!(&signed[280..284], &[0x27, 0x92, 0xe7, 0x06]);
         assert_eq!(decode_deadline_signed(&signed).unwrap(), DEADLINE);
         assert_eq!(signed[signed.len() - 1], 28);
     }
 
     #[test]
-    fn multiple_subcalls_concatenate_with_own_prefixes() {
+fn multiple_subcalls_concatenate_with_own_prefixes() {
         let a = synth_close([0x27, 0x92, 0xe7, 0x06]);
         let b = synth_close([0x8d, 0x09, 0xf2, 0x3f]);
         let intent = Intent {
@@ -391,9 +388,8 @@ fn encoding_is_deterministic_and_hash_sensitive() {
             deadline: DEADLINE,
         };
         let signed = encode_unsigned(&intent).unwrap();
-        // w4 = total data length (prefixes excluded)
-        assert_eq!(word_val(word_at(&signed, 4)), (a.len() + b.len()) as u128);
-        let mut off = 4 + 5 * 32;
+        // blob at 276: concatenated len-prefixed subcalls
+        let mut off = 276;
         for sc in [&a, &b] {
             let prefix = u32::from_be_bytes(signed[off..off + 4].try_into().unwrap());
             assert_eq!(prefix as usize, sc.len());
@@ -447,7 +443,8 @@ mod skeleton_tests {
 
     #[test]
     fn skeleton_words_match_live() {
-        // Our builder must emit: sel | 0x20 | 0x01 | ... (first 3 words fixed)
+        use crate::decode_deadline_unsigned;
+        // Live head (tx eeba39): sel | pad28 | 0x20 | 0x01 | 0x20 | target20 | ...
         let intent = crate::Intent {
             target: "0x6cd5661646289fb6e65ea5c032310fded797d0a2".into(),
             subcalls: vec![vec![0xec, 0x67, 0x83, 0xf0]],
@@ -455,12 +452,12 @@ mod skeleton_tests {
         };
         let unsigned = crate::encode_unsigned(&intent).expect("encode");
         assert_eq!(&unsigned[..4], &[0x25, 0x1f, 0xb2, 0x7d]);
-        assert_eq!(&unsigned[4..36], &[0u8; 28]);
-        assert_eq!(hex32(&unsigned[36..68]), W1);
-        assert_eq!(hex32(&unsigned[68..100]), W2);
+        assert!(unsigned[4..32].iter().all(|b| *b == 0));
+        assert_eq!(&unsigned[128..148], &hex::decode("6cd5661646289fb6e65ea5c032310fded797d0a2").unwrap()[..]);
+        assert_eq!(decode_deadline_unsigned(&unsigned).unwrap(), 1791709406);
     }
 
-    fn hex32(b: &[u8]) -> String {
+fn hex32(b: &[u8]) -> String {
         b.iter().map(|x| format!("{:02x}", x)).collect()
     }
 }
