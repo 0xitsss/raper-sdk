@@ -260,10 +260,6 @@ mod tests {
     const USER_SYNTH: &str = "0x1111111111111111111111111111111111111111";
     const DEADLINE: u64 = 0x6acb50de; // example unix-time-shaped value from trace notes
 
-    fn word_at(calldata: &[u8], index: usize) -> &[u8] {
-        &calldata[4 + index * 32..4 + (index + 1) * 32]
-    }
-
     fn word_val(word: &[u8]) -> u128 {
         let mut a = [0u8; 16];
         a.copy_from_slice(&word[16..]);
@@ -331,7 +327,7 @@ mod tests {
         assert_eq!(prefix as usize, sc.len());
         assert_eq!(&signed[BLOB_OFF + 4..BLOB_OFF + 4 + sc.len()], sc.as_slice());
         // blob padded to 32, then deadline word
-        let blob_end = BLOB_OFF + ((4 + sc.len() + 31) / 32) * 32;
+        let blob_end = BLOB_OFF + (4 + sc.len()).div_ceil(32) * 32;
         assert_eq!(word_val(&unsigned[blob_end..blob_end + 32]), DEADLINE as u128);
         assert_eq!(decode_deadline_unsigned(&unsigned).unwrap(), DEADLINE);
         assert_eq!(decode_deadline_signed(&signed).unwrap(), DEADLINE);
@@ -438,8 +434,6 @@ fn multiple_subcalls_concatenate_with_own_prefixes() {
 mod skeleton_tests {
     /// Live skeleton (HyperEVM tx eeba39…4d125f, 676 bytes): all fixed words
     /// must match our builder output. Addresses/aux/sig differ per tx.
-    const W1: &str = "0000000000000000000000000000000000000000000000000000000000000020";
-    const W2: &str = "0000000000000000000000000000000000000000000000000000000000000001";
 
     #[test]
     fn skeleton_words_match_live() {
@@ -455,9 +449,5 @@ mod skeleton_tests {
         assert!(unsigned[4..32].iter().all(|b| *b == 0));
         assert_eq!(&unsigned[128..148], &hex::decode("6cd5661646289fb6e65ea5c032310fded797d0a2").unwrap()[..]);
         assert_eq!(decode_deadline_unsigned(&unsigned).unwrap(), 1791709406);
-    }
-
-fn hex32(b: &[u8]) -> String {
-        b.iter().map(|x| format!("{:02x}", x)).collect()
     }
 }
