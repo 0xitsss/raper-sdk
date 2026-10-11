@@ -1,3 +1,5 @@
+![raper-sdk](assets/logo.png)
+
 # raper-sdk — direct-work SDK for Papertrade on HyperEVM 999
 
 Read-only-first SDK (alloy-based) for the Papertrade perps protocol.
