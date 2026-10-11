@@ -12,7 +12,7 @@ interface IExchange {
     function Unresolved_1afd17e9(uint32 arg0, uint256 arg1, address arg2, uint32 arg3) external pure;
     function Unresolved_1b7c1009() external view returns (bytes);
     function Unresolved_21f55a6c() external view returns (address);
-    function Unresolved_2792e706(address arg0, uint256 arg1, uint256 arg2, uint64 arg3, bool arg4, uint256 arg5, uint256 arg6) external;
+    function closePosition(address arg0, uint256 arg1, uint256 arg2, uint64 arg3, bool arg4, uint256 arg5, uint256 arg6) external;
     function Unresolved_2dcc7fce(uint256 arg0) external view returns (uint256);
     function Unresolved_31a39849() external view returns (uint256);
     function Unresolved_31a4956c(address arg0) external view returns (bool);
@@ -35,7 +35,7 @@ interface IExchange {
     function Unresolved_7f99545a(uint256 arg0) external view;
     function Unresolved_827ad94c(address arg0, uint256 arg1, uint256 arg2, uint256 arg3) external returns (bytes);
     function Unresolved_82f47a3f(address arg0, address arg1) external returns (uint256);
-    function Unresolved_8d09f23f(address arg0, uint256 arg1, uint256 arg2, uint64 arg3, bool arg4, uint256 arg5, uint256 arg6) external;
+    function closePositionAlt(address arg0, uint256 arg1, uint256 arg2, uint64 arg3, bool arg4, uint256 arg5, uint256 arg6) external;
     function Unresolved_ae4daf4e(address arg0, uint256 arg1, uint256 arg2) external returns (bytes);
     function Unresolved_ae69b95b(uint256 arg0) external returns (uint256);
     function Unresolved_af210ecc() external pure returns (uint256);
@@ -49,7 +49,7 @@ interface IExchange {
     function Unresolved_d7c7e5fb(uint32 arg0, uint32 arg1, address arg2) external returns (uint256);
     function Unresolved_dc8a47ef(uint32 arg0) external view returns (bytes);
     function Unresolved_e1f9209b() external view returns (address);
-    function Unresolved_ec6783f0(address arg0, uint32 arg1, uint256 arg2, address arg3, uint32 arg4, uint256 arg5, uint256 arg6, uint64 arg7, bool arg8, uint256 arg9, uint256 arg10) external returns (uint256);
+    function openPosition(address arg0, uint32 arg1, uint256 arg2, address arg3, uint32 arg4, uint256 arg5, uint256 arg6, uint64 arg7, bool arg8, uint256 arg9, uint256 arg10) external returns (uint256);
     function Unresolved_f1a8786c() external view returns (uint256);
     function Unresolved_f37d3c4f(uint32 arg0) external view returns (bytes);
     function Unresolved_f728fc98(uint256 arg0) external view returns (uint256);
