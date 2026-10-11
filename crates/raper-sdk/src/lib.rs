@@ -12,9 +12,18 @@
 pub mod addresses;
 pub mod bindings;
 pub mod metrics;
+pub mod pipeline;
 pub mod provider;
 pub mod rpc;
 pub mod tx;
 pub mod views;
 
 pub use addresses::*;
+
+/// Current unix time (seconds).
+pub fn now_unix() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}

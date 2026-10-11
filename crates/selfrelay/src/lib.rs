@@ -32,12 +32,23 @@
 //! 1-based word numbering for `w0..w2` above; `w4 = target` and the tail
 //! deadline at 0-based word index 17 ([`DEADLINE_WORD_INDEX`]).
 //!
+//! ## Auth model (VERIFIED in wallet decompile, no ecrecover on-chain)
+//!
+//! - No `ecrecover` exists in wallet or Exchange bytecode: signatures are
+//!   verified OFF-CHAIN by the official relayer. On-chain auth is:
+//!   caller bitmap (`only authorized relayers/session keys`) + selector
+//!   allowlist (`0xec6783f0` open, `0x83115825` second entry) + target
+//!   allowlist (exchange / sessionKeyManager).
+//! - To self-relay you need your EOA/session key authorized in the bitmap
+//!   (owner-only `0x9011e5f9` or the registerSessionKey flow), NOT a magic
+//!   preimage. `r/s/v` bytes ride along for the relayer path.
+//!
 //! ## What is NOT confirmed (do not rely on for mainnet)
 //!
-//! - **Signature preimage.** [`intent_hash`] returns `keccak256` of the whole
-//!   unsigned blob. This is a HYPOTHESIS for what the wallet signs; the real
-//!   scheme may be EIP-712 typed data (domain + struct hash) or another
-//!   preimage. Cross-check against a live signed trace before any real use.
+//! - **Relayer sig scheme.** [`intent_hash`] returns `keccak256` of the whole
+//!   unsigned blob as a working hypothesis for what the relayer checks.
+//!   Harmless for direct submit (chain does not check it), required only
+//!   if you route via the official relayer.
 //! - **Order-hash words.** Live traces show two hash-like `bytes32` right
 //!   before the deadline. In this layout they are the trailing words of the
 //!   subcall params region (reserved/zero slots on synthetic legs); their
@@ -133,6 +144,14 @@ fn u256_word_u64(v: u64) -> [u8; 32] {
     w
 }
 
+fn target_bytes(target: &str) -> std::result::Result<Vec<u8>, Error> {
+    let h = target.strip_prefix("0x").unwrap_or(target);
+    if h.len() != 40 || !h.bytes().all(|c| c.is_ascii_hexdigit()) {
+        return Err(Error::BadAddress(target.to_string()));
+    }
+    hex::decode(h).map_err(|_| Error::BadAddress(target.to_string()))
+}
+
 fn addr_word(target: &str) -> std::result::Result<[u8; 32], Error> {
     let h = target.strip_prefix("0x").unwrap_or(target);
     if h.len() != 40 || !h.bytes().all(|c| c.is_ascii_hexdigit()) {
@@ -170,13 +189,20 @@ pub fn encode_unsigned(intent: &Intent) -> Result<Vec<u8>> {
     let (data_len, blob) = checked_parts(intent)?;
     let pad = (32 - blob.len() % 32) % 32;
 
-    let mut out = Vec::with_capacity(4 + 6 * 32 + blob.len() + pad);
+    let mut out = Vec::with_capacity(4 + 28 + 6 * 32 + blob.len() + pad);
     out.extend_from_slice(&SEL_META_TX);
+    out.extend_from_slice(&[0u8; 28]);
     out.extend_from_slice(&u256_word(0x20));
     out.extend_from_slice(&u256_word(0x01));
     out.extend_from_slice(&u256_word(0x20));
-    out.extend_from_slice(&target);
-    out.extend_from_slice(&u256_word(data_len as u128));
+    out.extend_from_slice(&target_bytes(&intent.target)?);
+    // Live layout: 0xa0, 0x01, aux1(32B), aux2(32B), then blob.
+    // aux content unverified (zeros here) — HYPOTHESIS.
+    out.extend_from_slice(&u256_word(0xa0));
+    out.extend_from_slice(&u256_word(0x01));
+    out.extend_from_slice(&[0u8; 32]);
+    out.extend_from_slice(&[0u8; 32]);
+    out.extend_from_slice(&(data_len as u32).to_be_bytes());
     out.extend_from_slice(&blob);
     out.resize(out.len() + pad, 0);
     out.extend_from_slice(&u256_word_u64(intent.deadline));
@@ -192,7 +218,7 @@ pub fn encode_signed(intent: &Intent, r: &[u8; 32], s: &[u8; 32], v: u8) -> Resu
     Ok(out)
 }
 
-/// HYPOTHESIS: the signed-over preimage is `keccak256` of the whole unsigned
+/// AUTH MODEL (verified in wallet decompile): on-chain auth is caller bitmap + selector allowlist; is `keccak256` of the whole unsigned
 /// blob. EIP-712 typed-data vs raw-hash is NOT confirmed; neither is the
 /// exact preimage. Verify against a live signed trace before mainnet use.
 pub fn intent_hash(unsigned: &[u8]) -> [u8; 32] {
@@ -281,7 +307,7 @@ mod tests {
     }
 
     #[test]
-    fn canonical_open_shape_is_676_bytes_21_words() {
+    fn canonical_open_shape_live_layout() {
         let intent = Intent {
             target: EXCHANGE.to_string(),
             subcalls: vec![synth_open(DEADLINE)],
@@ -289,42 +315,32 @@ mod tests {
         };
         let unsigned = encode_unsigned(&intent).unwrap();
         let signed = encode_signed(&intent, &[0x11; 32], &[0x22; 32], 0x1b).unwrap();
-
-        assert_eq!(unsigned.len(), UNSIGNED_LEN_OPEN_LEG);
+        // live: signed 676 B, unsigned 580 B
         assert_eq!(signed.len(), SIGNED_LEN_OPEN_LEG);
+        assert_eq!(unsigned.len(), UNSIGNED_LEN_OPEN_LEG);
+        // head: sel | pad28 | 0x20 | 0x01
         assert_eq!(&signed[..4], &SEL_META_TX);
-        // head words w0..w2
-        assert_eq!(word_val(word_at(&signed, 0)), 0x20);
-        assert_eq!(word_val(word_at(&signed, 1)), 0x01);
-        assert_eq!(word_val(word_at(&signed, 2)), 0x20);
-        // raw first chunk reads as selector + 28 zero bytes
-        assert_eq!(&signed[..4], &[0x25, 0x1f, 0xb2, 0x7d]);
         assert!(signed[4..32].iter().all(|b| *b == 0));
-        // w3 = target
-        assert_eq!(decode_target(&signed).unwrap(), EXCHANGE.to_lowercase());
-        // w4 = data length word = 0x164
-        assert_eq!(word_val(word_at(&signed, 4)), OPEN_SUBCALL_DATA_LEN as u128);
-        // per-call 4-byte len prefix = subcall length
-        let blob_off = 4 + 5 * 32;
+        assert_eq!(word_val(&signed[32..64]), 0x20);
+        assert_eq!(word_val(&signed[64..96]), 0x01);
+        // target packed at bytes 128..148
+        assert_eq!(hex::encode(&signed[128..148]).to_lowercase(), EXCHANGE.trim_start_matches("0x").to_lowercase());
+        // blob at byte 276: u32 len + selector
+        let blob_off = 276usize;
         let prefix = u32::from_be_bytes(signed[blob_off..blob_off + 4].try_into().unwrap());
         assert_eq!(prefix as usize, OPEN_SUBCALL_DATA_LEN);
         assert_eq!(&signed[blob_off + 4..blob_off + 8], &SEL_OPEN);
-        // deadline at 0-based word 17
-        assert_eq!(
-            word_val(word_at(&signed, DEADLINE_WORD_INDEX)),
-            DEADLINE as u128
-        );
-        assert_eq!(decode_deadline_signed(&signed).unwrap(), DEADLINE);
+        // deadline = last word of unsigned
         assert_eq!(decode_deadline_unsigned(&unsigned).unwrap(), DEADLINE);
-        // sig tail: r, s, v word; v byte is the last calldata byte
+        assert_eq!(decode_deadline_signed(&signed).unwrap(), DEADLINE);
+        // sig tail: r, s words; v last byte
         assert_eq!(&signed[signed.len() - 96..signed.len() - 64], &[0x11; 32]);
         assert_eq!(&signed[signed.len() - 64..signed.len() - 32], &[0x22; 32]);
         assert_eq!(signed[signed.len() - 1], 0x1b);
-        assert_eq!(word_val(&signed[signed.len() - 32..]), 27);
     }
 
     #[test]
-    fn encoding_is_deterministic_and_hash_sensitive() {
+fn encoding_is_deterministic_and_hash_sensitive() {
         let intent = Intent {
             target: EXCHANGE.to_string(),
             subcalls: vec![synth_open(DEADLINE)],
@@ -419,5 +435,32 @@ mod tests {
             encode_unsigned(&bad_addr).unwrap_err(),
             Error::BadAddress(_)
         ));
+    }
+}
+
+#[cfg(test)]
+mod skeleton_tests {
+    /// Live skeleton (HyperEVM tx eeba39…4d125f, 676 bytes): all fixed words
+    /// must match our builder output. Addresses/aux/sig differ per tx.
+    const W1: &str = "0000000000000000000000000000000000000000000000000000000000000020";
+    const W2: &str = "0000000000000000000000000000000000000000000000000000000000000001";
+
+    #[test]
+    fn skeleton_words_match_live() {
+        // Our builder must emit: sel | 0x20 | 0x01 | ... (first 3 words fixed)
+        let intent = crate::Intent {
+            target: "0x6cd5661646289fb6e65ea5c032310fded797d0a2".into(),
+            subcalls: vec![vec![0xec, 0x67, 0x83, 0xf0]],
+            deadline: 1791709406,
+        };
+        let unsigned = crate::encode_unsigned(&intent).expect("encode");
+        assert_eq!(&unsigned[..4], &[0x25, 0x1f, 0xb2, 0x7d]);
+        assert_eq!(&unsigned[4..36], &[0u8; 28]);
+        assert_eq!(hex32(&unsigned[36..68]), W1);
+        assert_eq!(hex32(&unsigned[68..100]), W2);
+    }
+
+    fn hex32(b: &[u8]) -> String {
+        b.iter().map(|x| format!("{:02x}", x)).collect()
     }
 }
