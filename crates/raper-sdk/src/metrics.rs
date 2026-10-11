@@ -68,7 +68,7 @@ impl ProtocolSnapshot {
 }
 
 #[derive(Debug, Deserialize)]
-struct SummaryResp {
+pub struct SummaryResp {
     #[serde(default)]
     balances: Balances,
     #[serde(default)]
@@ -111,7 +111,7 @@ struct DeltaResp {
 }
 
 #[derive(Debug, Deserialize)]
-struct Delta {
+pub struct Delta {
     #[serde(default)]
     coin: String,
     #[serde(default)]
@@ -123,7 +123,8 @@ struct Delta {
 pub struct MetricsPoller {
     http: reqwest::Client,
     state_base: String,
-    Referer: String,
+    #[allow(non_snake_case)]
+    pub Referer: String,
 }
 
 impl MetricsPoller {

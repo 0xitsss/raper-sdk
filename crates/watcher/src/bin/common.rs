@@ -3,6 +3,7 @@
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize, Clone)]
+#[allow(dead_code)]
 pub struct TradeEvent {
     pub seq: String,
     pub ts: i64,

@@ -185,7 +185,7 @@ mod tests {
     #[test]
     fn close_legs() {
         for anchor in ["2792e706", "8d09f23f"] {
-            let mut h = String::from("251fb27d") + &"00".repeat(60) + "000000e4" + anchor + &"ab".repeat(224);
+            let h = String::from("251fb27d") + &"00".repeat(60) + "000000e4" + anchor + &"ab".repeat(224);
             match classify(&("0x".to_string() + &h)) {
                 Leg::Close { anchor: a, params } => {
                     assert_eq!(a, anchor);
