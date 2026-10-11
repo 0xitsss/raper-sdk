@@ -1,0 +1,16 @@
+[package]
+name = "selfrelay"
+version = "0.1.0"
+edition = "2021"
+description = "Builder for Papertrade wallet meta-tx 0x251fb27d (HyperEVM 999). Encoding only, no signing/sending."
+license = "MIT"
+
+[dependencies]
+sha3 = "0.10"
+hex = "0.4"
+
+# NOTE: standalone crate (detached from parent workspace) so that the
+# workspace `members` list stays untouched. Wiring `crates/selfrelay`
+# into `/home/user/paper-raper/v2/Cargo.toml` members is pending and
+# must be done explicitly by the owner (see lib.rs docs).
+
