@@ -1,4 +1,4 @@
-![raper-sdk](assets/logo.png)
+![raper-sdk](assets/logo.svg)
 
 # raper-sdk — direct-work SDK for Papertrade on HyperEVM 999
 
