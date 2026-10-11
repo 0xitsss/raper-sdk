@@ -1,0 +1,1 @@
+//! Papertrade haircut simulator.

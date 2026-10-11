@@ -1,0 +1,17 @@
+[package]
+name = "watcher"
+version = "0.1.0"
+edition = "2021"
+autobins = false
+
+[[bin]]
+name = "profile"
+path = "src/bin/profile.rs"
+
+[dependencies]
+decoder = { path = "../decoder" }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+anyhow = "1"
